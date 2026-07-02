@@ -1,5 +1,5 @@
 {
-    "name": "hydra/core",
+    "name": "hydrakit/core",
     "description": "Core library for Hydra PHP framework",
     "type": "library",
     "license": "MIT",
