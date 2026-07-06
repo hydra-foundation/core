@@ -52,6 +52,55 @@ final class EnvironmentTest extends TestCase
         $this->assertSame('single', $env->get('ALT'));
     }
 
+    public function testStripsInlineCommentFromUnquotedValue(): void
+    {
+        // Regression: the shipped .env.example uses inline comments; keeping
+        // them in the value silently corrupted APP_DEBUG, APP_KEY and DB_HOST.
+        $env = $this->writeEnv("APP_DEBUG=true  # Set to false in production\n");
+        $this->assertSame('true', $env->get('APP_DEBUG'));
+        $this->assertTrue($env->bool('APP_DEBUG'));
+    }
+
+    public function testStripsInlineCommentWithSingleSpace(): void
+    {
+        $env = $this->writeEnv("DB_HOST=localhost # or 127.0.0.1\n");
+        $this->assertSame('localhost', $env->get('DB_HOST'));
+    }
+
+    public function testHashInsideQuotedValueIsPreserved(): void
+    {
+        // Inside quotes, # is data — not the start of a comment.
+        $env = $this->writeEnv("SECRET=\"abc#123 # not a comment\"\nALT='x # y'\n");
+        $this->assertSame('abc#123 # not a comment', $env->get('SECRET'));
+        $this->assertSame('x # y', $env->get('ALT'));
+    }
+
+    public function testUrlWithFragmentInsideQuotesSurvives(): void
+    {
+        $env = $this->writeEnv("DOCS_URL=\"https://example.com/page#section\"\n");
+        $this->assertSame('https://example.com/page#section', $env->get('DOCS_URL'));
+    }
+
+    public function testMismatchedQuotesAreNotStripped(): void
+    {
+        // Regression: trim($value, "\"'") stripped mismatched quotes from
+        // either end ("foo' became foo), mangling values that legitimately
+        // begin or end with a quote character.
+        $env = $this->writeEnv("MIXED=\"foo'\nMIXED2='bar\"\nOPEN=\"unterminated\nTRAIL=trailing'\n");
+        $this->assertSame("\"foo'", $env->get('MIXED'));
+        $this->assertSame("'bar\"", $env->get('MIXED2'));
+        $this->assertSame('"unterminated', $env->get('OPEN'));
+        $this->assertSame("trailing'", $env->get('TRAIL'));
+    }
+
+    public function testValueThatIsOnlyACommentBecomesEmptyString(): void
+    {
+        $env = $this->writeEnv("APP_KEY= # generate me\nBARE=#no space before hash\n");
+        $this->assertSame('', $env->get('APP_KEY'));
+        $this->assertSame('', $env->get('BARE'));
+        $this->assertTrue($env->has('APP_KEY'), 'key is set; its value is just empty');
+    }
+
     public function testSkipsCommentsBlankAndMalformedLinesWithoutWarning(): void
     {
         // failOnWarning="true" in phpunit.xml makes a PHP warning fail this test,

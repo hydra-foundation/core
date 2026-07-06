@@ -37,12 +37,45 @@ final class Environment
             [$key, $value] = explode('=', $line, 2);
 
             $key = trim($key);
-            $value = trim(trim($value), "\"'");
+            $value = $this->parseValue(trim($value));
 
             $this->data[$key] = $value;
             $_ENV[$key] = $value;
             putenv("{$key}={$value}");
         }
+    }
+
+    /**
+     * Normalizes a raw .env value.
+     *
+     * Quoted values ("..." or '...') are taken literally with exactly one
+     * matching pair of quotes removed — a `#` inside quotes is data, not a
+     * comment, so URLs with fragments survive. A blind trim($value, "\"'")
+     * would also strip MISMATCHED quotes ("foo' → foo), silently corrupting
+     * values, so only a same-character pair is removed.
+     *
+     * Unquoted values may carry inline comments (`APP_DEBUG=true # prod: false`);
+     * everything from the first whitespace-then-# is dropped so the comment
+     * never leaks into the value. A value that is only a comment becomes "".
+     */
+    private function parseValue(string $value): string
+    {
+        if (strlen($value) >= 2) {
+            $first = $value[0];
+            if (($first === '"' || $first === "'") && str_ends_with($value, $first)) {
+                return substr($value, 1, -1);
+            }
+        }
+
+        $value = preg_replace('/\s+#.*$/', '', $value) ?? $value;
+
+        // `KEY= # comment` leaves a bare "#..." with no leading whitespace
+        // after the '=' trim; that is still a comment, not a value.
+        if (str_starts_with($value, '#')) {
+            return '';
+        }
+
+        return rtrim($value);
     }
 
     public function get(string $key, mixed $default = null): mixed
