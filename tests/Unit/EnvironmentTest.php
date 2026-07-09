@@ -11,6 +11,9 @@ final class EnvironmentTest extends TestCase
 {
     private string $dir;
 
+    /** @var list<string> keys this test's .env may have exported to the process env */
+    private array $written = [];
+
     protected function setUp(): void
     {
         $this->dir = sys_get_temp_dir() . '/hydra-env-' . uniqid('', true);
@@ -19,6 +22,15 @@ final class EnvironmentTest extends TestCase
 
     protected function tearDown(): void
     {
+        // Environment exports .env values to the real process environment,
+        // and the real environment beats the file — so scrub every key this
+        // test wrote, or a stale export would leak into the next test.
+        foreach ($this->written as $key) {
+            putenv($key);
+            unset($_ENV[$key], $_SERVER[$key]);
+        }
+        $this->written = [];
+
         $envFile = $this->dir . '/.env';
         if (file_exists($envFile)) {
             unlink($envFile);
@@ -29,6 +41,15 @@ final class EnvironmentTest extends TestCase
     private function writeEnv(string $contents): Environment
     {
         file_put_contents($this->dir . '/.env', $contents);
+
+        foreach (explode("\n", $contents) as $line) {
+            $line = trim($line);
+            if ($line === '' || str_starts_with($line, '#') || !str_contains($line, '=')) {
+                continue;
+            }
+            $this->written[] = trim(explode('=', $line, 2)[0]);
+        }
+
         return new Environment($this->dir);
     }
 
@@ -124,17 +145,123 @@ final class EnvironmentTest extends TestCase
         $this->assertFalse($env->has('ABSENT'));
     }
 
-    public function testBoolCoercion(): void
+    public function testRealEnvironmentBeatsDotEnvFile(): void
     {
-        $env = $this->writeEnv("A=true\nB=1\nC=yes\nD=on\nE=false\nF=0\nG=anything\n");
-        $this->assertTrue($env->bool('A'));
-        $this->assertTrue($env->bool('B'));
-        $this->assertTrue($env->bool('C'));
-        $this->assertTrue($env->bool('D'));
-        $this->assertFalse($env->bool('E'));
-        $this->assertFalse($env->bool('F'));
-        $this->assertFalse($env->bool('G'));
-        $this->assertTrue($env->bool('MISSING', true));
+        // A variable the process already has (container runtime, web server,
+        // an `export`) must override the .env file's value — and the file's
+        // value must not be exported over it either.
+        putenv('HYDRA_TEST_REAL=from-process');
+        $_ENV['HYDRA_TEST_REAL'] = 'from-process';
+
+        try {
+            $env = $this->writeEnv("HYDRA_TEST_REAL=from-file\n");
+
+            $this->assertSame('from-process', $env->get('HYDRA_TEST_REAL'));
+            $this->assertSame('from-process', getenv('HYDRA_TEST_REAL'));
+            $this->assertSame('from-process', $_ENV['HYDRA_TEST_REAL']);
+        } finally {
+            putenv('HYDRA_TEST_REAL');
+            unset($_ENV['HYDRA_TEST_REAL'], $_SERVER['HYDRA_TEST_REAL']);
+        }
+    }
+
+    public function testVariableSetViaPutenvAloneStillBeatsDotEnv(): void
+    {
+        // getenv()-only variables (no $_ENV mirror) count as the real
+        // environment too.
+        putenv('HYDRA_TEST_GETENV=os-level');
+
+        try {
+            $env = $this->writeEnv("HYDRA_TEST_GETENV=from-file\n");
+
+            $this->assertSame('os-level', $env->get('HYDRA_TEST_GETENV'));
+        } finally {
+            putenv('HYDRA_TEST_GETENV');
+        }
+    }
+
+    public function testDotEnvValueIsExportedWhenProcessHasNoValue(): void
+    {
+        $env = $this->writeEnv("HYDRA_TEST_EXPORT=filled-from-file\n");
+
+        try {
+            $this->assertSame('filled-from-file', $env->get('HYDRA_TEST_EXPORT'));
+            $this->assertSame('filled-from-file', getenv('HYDRA_TEST_EXPORT'));
+            $this->assertSame('filled-from-file', $_ENV['HYDRA_TEST_EXPORT']);
+        } finally {
+            putenv('HYDRA_TEST_EXPORT');
+            unset($_ENV['HYDRA_TEST_EXPORT']);
+        }
+    }
+
+    public function testRequiredReturnsTheValue(): void
+    {
+        $env = $this->writeEnv("NEEDED_SECRET=s3cret\n");
+        $this->assertSame('s3cret', $env->required('NEEDED_SECRET'));
+    }
+
+    public function testRequiredThrowsNamingTheMissingKey(): void
+    {
+        $env = $this->writeEnv("APP_NAME=hydra\n");
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Required environment variable "TOTALLY_MISSING" is not set');
+
+        $env->required('TOTALLY_MISSING');
+    }
+
+    public function testRequiredThrowsOnEmptyValue(): void
+    {
+        // `KEY=` in the file is set-but-empty; for required config that is
+        // the same misconfiguration as unset.
+        $env = $this->writeEnv("EMPTY_REQUIRED=\n");
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Required environment variable "EMPTY_REQUIRED" is not set');
+
+        $env->required('EMPTY_REQUIRED');
+    }
+
+    public function testBoolAcceptedForms(): void
+    {
+        // The documented contract: true/false, 1/0, yes/no, on/off — case-
+        // insensitively. Nothing else.
+        $env = $this->writeEnv(
+            "BT1=true\nBT2=1\nBT3=yes\nBT4=on\nBT5=TRUE\nBT6=Yes\n" .
+            "BF1=false\nBF2=0\nBF3=no\nBF4=off\nBF5=FALSE\nBF6=Off\n"
+        );
+
+        foreach (['BT1', 'BT2', 'BT3', 'BT4', 'BT5', 'BT6'] as $key) {
+            $this->assertTrue($env->bool($key), "{$key} should parse as true");
+        }
+        foreach (['BF1', 'BF2', 'BF3', 'BF4', 'BF5', 'BF6'] as $key) {
+            $this->assertFalse($env->bool($key), "{$key} should parse as false");
+        }
+
+        $this->assertTrue($env->bool('MISSING_BOOL', true), 'missing key returns the default');
+        $this->assertFalse($env->bool('MISSING_BOOL'));
+    }
+
+    public function testBoolRejectsGarbage(): void
+    {
+        // A present-but-non-boolean value is a config error, not a silent
+        // false — same policy as int().
+        $env = $this->writeEnv("FLAGGY=anything\n");
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Environment value for "FLAGGY" must be a boolean');
+
+        $env->bool('FLAGGY');
+    }
+
+    public function testBoolRejectsEmptyString(): void
+    {
+        $env = $this->writeEnv("EMPTY_FLAG=\n");
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Environment value for "EMPTY_FLAG" must be a boolean');
+
+        $env->bool('EMPTY_FLAG');
     }
 
     public function testIntCoercion(): void
