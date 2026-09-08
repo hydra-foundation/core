@@ -5,20 +5,9 @@ declare(strict_types=1);
 namespace Hydra\Core;
 
 /**
- * Reads `<basePath>/.env` once, at construction, and exposes typed accessors.
+ * Environment 
  *
- * Precedence: the real process environment wins. A variable already set in
- * $_ENV, $_SERVER, or the OS environment (getenv) — by a container runtime,
- * the web server, or an `export` — overrides the `.env` file's value, so a
- * deployment can override checked-in defaults without editing the file.
- * `.env` values fill the gaps and are exported to $_ENV/putenv for code that
- * reads those directly, but never clobber a variable the process already has.
- *
- * Parsing the file is real work done in the constructor, so construct this
- * exactly once per process and share the instance — Hydra's composition root
- * builds one and binds it in the container. There is deliberately no static
- * cache here: a hidden singleton would be magic; the single construction is
- * explicit in the bootstrap instead.
+ * Reads .env once, at construction, and exposes typed accessors.
  */
 final class Environment
 {
@@ -92,16 +81,6 @@ final class Environment
 
     /**
      * Normalizes a raw .env value.
-     *
-     * Quoted values ("..." or '...') are taken literally with exactly one
-     * matching pair of quotes removed — a `#` inside quotes is data, not a
-     * comment, so URLs with fragments survive. A blind trim($value, "\"'")
-     * would also strip MISMATCHED quotes ("foo' → foo), silently corrupting
-     * values, so only a same-character pair is removed.
-     *
-     * Unquoted values may carry inline comments (`APP_DEBUG=true # prod: false`);
-     * everything from the first whitespace-then-# is dropped so the comment
-     * never leaks into the value. A value that is only a comment becomes "".
      */
     private function parseValue(string $value): string
     {
@@ -142,14 +121,6 @@ final class Environment
 
     /**
      * The value for $key, which must be set and non-empty.
-     *
-     * Fail-fast accessor for configuration the app cannot run without
-     * (credentials, signing keys, DSNs): an unset key — or one set to an
-     * empty string, which for required config is the same misconfiguration —
-     * throws here, at boot, instead of surfacing as a broken null/"" deep in
-     * the app.
-     *
-     * @throws \RuntimeException when the key is unset or empty.
      */
     public function required(string $key): string
     {
@@ -186,10 +157,7 @@ final class Environment
     /**
      * Accepted forms, case-insensitive: `true`/`false`, `1`/`0`, `yes`/`no`,
      * `on`/`off`. A missing key returns $default; any other present value
-     * (including an empty string) throws — a mistyped boolean is a config
-     * error, not a silent false, same policy as {@see int()}.
-     *
-     * @throws \InvalidArgumentException when the value is not boolean-ish.
+     * (including an empty string) throws
      */
     public function bool(string $key, bool $default = false): bool
     {

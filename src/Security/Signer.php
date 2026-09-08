@@ -5,19 +5,9 @@ declare(strict_types=1);
 namespace Hydra\Core\Security;
 
 /**
+ * Signer
+ *
  * HMAC-SHA256 message signing under an explicitly-injected key.
- *
- * Hydra's one signing mechanism: given a key (APP_KEY, wired in by
- * {@see SignerServiceProvider}), it seals a string so the same key can later
- * prove the string is unchanged and self-minted. The value lives in the
- * signature, not a server-side store — which is what makes it useful for things
- * that leave the server and come back with no counterpart to compare against
- * (CSRF tokens today; signed URLs and cookies as those features arrive).
- *
- * The key is a constructor argument, never read from a global here — the only
- * place APP_KEY is named is the provider. {@see fromHex()} decodes Hydra's
- * canonical hex key format; the raw constructor is for callers that already hold
- * key bytes. A short key is a configuration error and fails loud.
  */
 final class Signer
 {
@@ -45,9 +35,7 @@ final class Signer
     }
 
     /**
-     * Seal a message: "<64-hex-hmac>.<message>". The signature comes first so it
-     * is fixed-width — the message that follows may itself contain any bytes,
-     * dots included, and {@see verify()} still parses the two apart unambiguously.
+     * Seal a message: "<64-hex-hmac>.<message>".
      */
     public function sign(string $message): string
     {
@@ -56,9 +44,7 @@ final class Signer
 
     /**
      * The original message if $signed verifies (constant-time) under the current
-     * key or any previous key; otherwise null. Never throws on malformed input —
-     * a forged or truncated value is simply not valid, which callers handle the
-     * same as any other failed check.
+     * key or any previous key; otherwise null.
      */
     public function verify(string $signed): ?string
     {
@@ -82,10 +68,7 @@ final class Signer
 
     /**
      * Build a Signer from Hydra's canonical key format: a hex string (64+ chars)
-     * decoded to raw bytes. Rejects non-hex, odd-length, or too-short input with
-     * an {@see \InvalidArgumentException} naming the fix.
-     *
-     * @param list<string> $previousHex older keys, same format, for a rotation window
+     * decoded to raw bytes.
      */
     public static function fromHex(string $hex, array $previousHex = []): self
     {

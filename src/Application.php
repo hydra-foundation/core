@@ -9,6 +9,8 @@ use Hydra\Core\Contracts\KernelInterface;
 use Hydra\Core\Contracts\ServiceProviderInterface;
 
 /**
+ * Application
+ *
  * The core application
  */
 final class Application
@@ -21,11 +23,6 @@ final class Application
         private readonly ContainerInterface $container
     ) {}
 
-    /**
-     * The container every provider has registered into. Exposed so an alternate
-     * entrypoint (e.g. a CLI) can resolve services from the same composition
-     * root the HTTP path uses, instead of run()ing the HTTP kernel.
-     */
     public function container(): ContainerInterface
     {
         return $this->container;
@@ -36,8 +33,6 @@ final class Application
         $provider->register($this->container);
         $this->providers[] = $provider;
 
-        // A provider registered after the app has booted still needs booting,
-        // otherwise its boot() silently never runs.
         if ($this->booted) {
             $provider->boot($this->container);
         }
@@ -62,8 +57,6 @@ final class Application
     {
         $this->boot();
 
-        // The kernel is a service like any other — resolved only after every
-        // provider has had a chance to register and boot its bindings.
         $kernel = $this->container->get(KernelInterface::class);
 
         $kernel->handle();
