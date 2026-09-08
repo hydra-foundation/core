@@ -6,6 +6,9 @@ namespace Hydra\Core\Contracts;
 
 use Psr\Container\ContainerInterface as PsrContainerInterface;
 
+/**
+ * Container interface
+ */
 interface ContainerInterface extends PsrContainerInterface
 {
     /**

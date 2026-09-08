@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Hydra\Core\Contracts;
 
+/**
+ * Kernel interface
+ */
 interface KernelInterface
 {
     /**
